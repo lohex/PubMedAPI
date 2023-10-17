@@ -10,11 +10,11 @@ from typing import List, Generator, Optional
 from bs4 import BeautifulSoup as html
 import requests as http
 
-from PubMedArticle import PubMedArticle
+from .PubMedArticle import PubMedArticle
 
 
 class PubMedSearch:
-    def __init__(self, search_str: str,
+    def __init__(self, search_str: Optional[str] = None,
                  not_older_than: Optional[str] = None,
                  abstract_available: bool = True
                  ) -> None:
@@ -26,10 +26,21 @@ class PubMedSearch:
             not_older_than: Filters articles not older than specified time.
             abstract_available: Whether to filter for articles with abstracts.
         """
+        if search_str is not None:
+            query = self.buildQuery(
+                search_str, not_older_than, abstract_available
+            )
+            self.startFromQuery(query)
+
+    def startFromQuery(self, query: str) -> None:
+        """
+        Starts a search defined by query from the first page of results ()
+
+        Args:
+            query (str): Full pubmed http query
+        """
         self.results_page = 1
-        query = self.buildQuery(search_str, not_older_than, abstract_available)
-        response = http.get(query)
-        doc = html(response.text)
+        doc = self.sendQuery(query)
 
         results = doc.find('div', class_="results-amount")
         self.n_results = int(results.h3.span.text.replace(',', ''))
@@ -37,8 +48,11 @@ class PubMedSearch:
 
         self.articles = self.extractResults(doc)
 
-    def buildQuery(self, search_str: str, not_older_than: Optional[str],
-                   abstract_available: bool) -> str:
+    def buildQuery(self,
+                   search_str: str,
+                   not_older_than: Optional[str],
+                   abstract_available: bool
+                   ) -> str:
         """
         Builds the search query URL.
 
@@ -51,38 +65,47 @@ class PubMedSearch:
             The search query URL.
         """
         self.search_str = search_str
-        query = (
+        self.query = (
             f'https://pubmed.ncbi.nlm.nih.gov/'
-            f'?term={self.search_str}&page={self.results_page}'
+            f'?term={self.search_str}'
         )
         if not_older_than:
             if not_older_than == "1_year":
-                query += "&filter=datesearch.y_1"
+                self.query += "&filter=datesearch.y_1"
             elif not_older_than == "5_years":
-                query += "&filter=datesearch.y_5"
+                self.query += "&filter=datesearch.y_5"
             elif not_older_than == "10_years":
-                query += "&filter=datesearch.y_10"
+                self.query += "&filter=datesearch.y_10"
             else:
                 raise Exception(f'Invalid search flag "{not_older_than}"')
 
         if abstract_available:
-            query += "&filter=simsearch1.fha"
+            self.query += "&filter=simsearch1.fha"
 
-        return query
+        return self.query
 
     def grepMoreResults(self) -> None:
         """
         Fetches more results from the PubMed website.
         """
         self.results_page += 1
-        query = (
-            f'https://pubmed.ncbi.nlm.nih.gov/?'
-            f'term={self.search_str}&page={self.results_page}'
-        )
-        response = http.get(query)
-        doc = html(response.text)
-
+        doc = self.sendQuery(self.query)
         self.articles += self.extractResults(doc)
+
+    def sendQuery(self, query: str) -> None:
+        """
+        Sends the initial query for the current page (from self.results_page)
+
+        Args:
+            query: full http query to pubmed
+
+        Returns
+            Parsed BeatutiflSoup document.
+        """
+        query += f'&page={self.results_page}'
+        response = http.get(query)
+        doc = html(response.text, "html.parser")
+        return doc
 
     def extractResults(self, doc) -> List:
         """
@@ -98,16 +121,23 @@ class PubMedSearch:
         pubmed_ids = [p.attrs['data-article-id'] for p in page_links]
         titles = [p.text for p in page_links]
         docsum_autorhs = doc.find_all('span', class_="docsum-authors")
-        authors = [s.text for s in docsum_autorhs]
+        authors_long = [s.text for s in docsum_autorhs[::2]]
+        authors_short = [s.text for s in docsum_autorhs[1::2]]
         citations = [
             c.text
             for c in doc.find_all('span', class_="docsum-journal-citation")
         ]
 
-        results = [PubMedArticle(id, title, authors, pub)
-                   for id, title, authors, pub
-                   in zip(pubmed_ids, titles, authors, citations)
-                   ]
+        results = [
+            PubMedArticle(*args)
+            for args in zip(
+                pubmed_ids,
+                titles,
+                authors_long,
+                authors_short,
+                citations
+            )
+        ]
         return results
 
     def scan_results(self, limit: int = 100) -> Generator:

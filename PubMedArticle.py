@@ -30,7 +30,8 @@ class PubMedArticle:
     """
     def __init__(self, id: str,
                  title: Optional[str] = None,
-                 authors: Optional[str] = None,
+                 authors_long: Optional[str] = None,
+                 authors_short: Optional[str] = None,
                  publication: Optional[str] = None
                  ) -> None:
         """
@@ -46,9 +47,14 @@ class PubMedArticle:
         """
         self.id = id
         if title is not None:
-            self.setMetaData(title, authors, publication)
+            self.setMetaData(title, authors_long, authors_short, publication)
 
-    def setMetaData(self, title: str, authors: str, publication: str) -> None:
+    def setMetaData(self,
+                    title: str,
+                    authors_long: str,
+                    authors_short: str,
+                    publication: str
+                    ) -> None:
         """
         Sets the metadata for the article.
 
@@ -58,7 +64,8 @@ class PubMedArticle:
             publication (str): The publication where the article was published.
         """
         self.title = title.strip()
-        self.authors = authors.strip()
+        self.authors_long = authors_long.strip()
+        self.authors_short = authors_short.strip()
         self.publication = publication.strip()
 
     def __str__(self) -> str:
@@ -70,8 +77,8 @@ class PubMedArticle:
         """
         if hasattr(self, "title"):
             return (
-                f"{self.authors} {self.title}"
-                f"{self.publication} PMID {self.id}"
+                f"{self.authors_short} {self.title}"
+                f" {self.publication} PMID {self.id}"
             )
         else:
             return f"PMID {self.id}"
@@ -81,7 +88,7 @@ class PubMedArticle:
         Loads the article details from PubMed using its ID.
         """
         response = http.get(f'https://pubmed.ncbi.nlm.nih.gov/{self.id}/')
-        self.doc = html(response.text)
+        self.doc = html(response.text, "html.parser")
         self.abstract = self.doc.find('div', class_="abstract-content")
         if self.abstract is not None:
             self.abstract = re.sub("\n+", "\n", self.abstract.text.strip())
@@ -109,7 +116,9 @@ class PubMedArticle:
             [re.sub("([A-Z])[^ ]+ ([^ ]) ([^ ]+)", "\\3 \\1\\2", a).strip()
              for a in authors.split(',')]) + "."
 
-        self.setMetaData(title, authors, publication)
+        self.setMetaData(
+            title, authors_long=authors, publication=publication
+        )
 
     def articles_citing(self, limit: int = 100) -> Generator:
         """
@@ -141,7 +150,7 @@ class PubMedArticle:
             f'from_uid={self.id}&page={self.citing_page}'
         )
         response = http.get(link)
-        doc = html(response.text)
+        doc = html(response.text, "html.parser")
         self.citing += self.extractRefferings(doc)
 
     def extractRefferings(self, doc) -> list:
@@ -158,13 +167,19 @@ class PubMedArticle:
         pubmed_ids = [p.attrs['data-article-id'] for p in page_links]
         titles = [p.text for p in page_links]
         class_name = "docsum-authors"
-        authors = [s.text for s in doc.find_all('span', class_=class_name)]
+        authors_long = [
+            s.text for s in doc.find_all('span', class_=class_name)
+        ]
         class_name = "docsum-journal-citation"
         citations = [c.text for c in doc.find_all('span', class_=class_name)]
 
         results = [
-            PubMedArticle(id, title, authors, pub)
-            for id, title, authors, pub
-            in zip(pubmed_ids, titles, authors, citations)
+            PubMedArticle(*args)
+            for args in zip(
+                pubmed_ids,
+                titles,
+                authors_long=authors_long,
+                citations=citations
+            )
         ]
         return results

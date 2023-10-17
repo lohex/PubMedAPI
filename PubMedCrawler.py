@@ -8,10 +8,10 @@ Author: Lorenz Hexemer
 """
 import os
 import dill
-from types import Optional
+from typing import Optional
 
-from PubMedArticle import PubMedArticle
-from PubMedSearch import PubMedSearch
+from .PubMedArticle import PubMedArticle
+from .PubMedSearch import PubMedSearch
 
 
 class PubMedCrawler:
@@ -84,7 +84,7 @@ class PubMedCrawler:
         info = {
             'id': article.id,
             'title': article.title,
-            'authors': article.authors,
+            'authors': article.authors_long,
             'citation': article.publication,
             'found_by': []
         }
